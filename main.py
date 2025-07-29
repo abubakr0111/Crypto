@@ -351,6 +351,8 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="Произошла ошибка. Пожалуйста, попробуйте позже."
         )
 
+# ... (весь ваш предыдущий код остается без изменений до функции main)
+
 async def main():
     # Создаем приложение
     application = ApplicationBuilder().token(TOKEN).build()
@@ -371,11 +373,38 @@ async def main():
     # Запускаем webhook
     await application.run_webhook(
         listen="0.0.0.0",
-        port=8080,
+        port=int(os.environ.get("PORT", 8080)),  # Render использует порт из переменной окружения
         url_path=TOKEN,
-        webhook_url=f"https://your-render-app-name.onrender.com/{TOKEN}",
-        secret_token='YOUR_SECRET_TOKEN'
+        webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}",
+        secret_token=os.environ.get('WEBHOOK_SECRET', 'YOUR_SECRET_TOKEN')
     )
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    # Просто запускаем main() без asyncio.run()
+    application = ApplicationBuilder().token(TOKEN).build()
+    
+    # Добавляем обработчики (дублируем, так как это теперь синхронный код)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_panel))
+    application.add_handler(CommandHandler("history", send_history))
+    application.add_handler(CommandHandler("set_photo", set_photo))
+    application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_error_handler(error_handler)
+    
+    # Для Render лучше использовать polling, если у вас нет домена с HTTPS
+    application.run_polling()
+
+if __name__ == '__main__':
+    application = ApplicationBuilder().token(TOKEN).build()
+    # ... добавьте все обработчики ...
+    
+    # Для Render webhook:
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 8080)),
+        url_path=TOKEN,
+        webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}",
+        secret_token=os.environ.get('WEBHOOK_SECRET')
+    )
