@@ -17,7 +17,7 @@ import telegram
 import asyncio
 
 # 🔐 Токен и ID админа
-TOKEN = '7313454103:AAGJEMNktJUABdhxky-BT8eTSAJ3TpcLdvA'
+TOKEN = '7313454103:AAHNr7UdbLpNNtL0JW7-mQhxJLnRX3Jh88c'
 ADMIN_ID = 664563521
 
 # Константы
