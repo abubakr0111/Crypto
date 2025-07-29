@@ -353,5 +353,28 @@ def main():
     logger.info("Бот запущен в режиме polling...")
     application.run_polling()
 
+
 if __name__ == '__main__':
-    main()
+    application = ApplicationBuilder().token(TOKEN).build()
+    
+    # Добавьте все обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_panel))
+    application.add_handler(CommandHandler("history", send_history))
+    application.add_handler(CommandHandler("set_photo", set_photo))
+    application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
+    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_error_handler(error_handler)
+    
+    # Удаляем существующий webhook
+    await application.bot.delete_webhook()
+    
+    # Запускаем webhook
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)),
+        url_path=TOKEN,
+        webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}",
+        secret_token=os.environ.get('WEBHOOK_SECRET', 'YOUR_SECRET_TOKEN')
+    )
