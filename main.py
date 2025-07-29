@@ -398,13 +398,10 @@ if __name__ == '__main__':
 
 if __name__ == '__main__':
     application = ApplicationBuilder().token(TOKEN).build()
-    # ... добавьте все обработчики ...
     
-    # Для Render webhook:
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),
-        url_path=TOKEN,
-        webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}",
-        secret_token=os.environ.get('WEBHOOK_SECRET')
-    )
+    # Добавьте все обработчики
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_panel))
+    # ... остальные обработчики ...
+    
+    application.run_polling()
