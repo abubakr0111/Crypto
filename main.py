@@ -117,41 +117,41 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if candles is not None and not candles.empty:
                     add_indicators(candles)
                     
-                    # Генерация графика во временный файл
-                    with tempfile.NamedTemporaryFile(suffix='.png') as tmp:
-                        fig = plot_candlestick(candles)
-                        fig.savefig(tmp.name)
-                        plt.close(fig)
-                        tmp.seek(0)
-                        
-                        prediction = escape_markdown(predict_trend(candles))
-                        support, resistance = get_support_resistance(candles)
-                        tp = calc_tp(candles)
-                        sl = calc_sl(candles)
+                    # Генерация графика
+                    fig = plot_candlestick(candles)
+                    buf = BytesIO()
+                    fig.savefig(buf, format='png', dpi=100)
+                    buf.seek(0)
+                    plt.close(fig)
+                    
+                    prediction = escape_markdown(predict_trend(candles))
+                    support, resistance = get_support_resistance(candles)
+                    tp = calc_tp(candles)
+                    sl = calc_sl(candles)
 
-                        caption = (
-                            f"<b>{pair} — {tf}</b>\n"
-                            f"📈 Прогноз:\n{prediction}\n"
-                            f"🔻 Поддержка: {support:.2f}\n"
-                            f"🔺 Сопротивление: {resistance:.2f}\n"
-                            f"🎯 Take Profit: {tp}\n"
-                            f"🛑 Stop Loss: {sl}"
-                        )
+                    caption = (
+                        f"<b>{pair} — {tf}</b>\n"
+                        f"📈 Прогноз:\n{prediction}\n"
+                        f"🔻 Поддержка: {support:.2f}\n"
+                        f"🔺 Сопротивление: {resistance:.2f}\n"
+                        f"🎯 Take Profit: {tp}\n"
+                        f"🛑 Stop Loss: {sl}"
+                    )
 
-                        await context.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=tmp,
-                            caption=caption,
-                            parse_mode="HTML"
-                        )
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=buf,
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
 
-                        save_forecast({
-                            "user": chat_id,
-                            "pair": pair,
-                            "timeframe": tf,
-                            "prediction": prediction,
-                            "timestamp": datetime.now().isoformat()
-                        })
+                    save_forecast({
+                        "user": chat_id,
+                        "pair": pair,
+                        "timeframe": tf,
+                        "prediction": prediction,
+                        "timestamp": datetime.now().isoformat()
+                    })
                 else:
                     await query.edit_message_text("❌ Не удалось получить данные для пары. Убедитесь, что она существует.")
             except Exception as e:
@@ -183,7 +183,7 @@ def get_futures_candles(symbol: str, interval: str, limit: int = 100):
         return pd.DataFrame(ohlc).set_index('Date')
     except Exception as e:
         logger.error(f"Ошибка загрузки фьючерсных свечей: {e}")
-        return pd.DataFrame(columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume']).set_index('Date')
+        return None
 
 def add_indicators(df):
     df['EMA20'] = df['Close'].ewm(span=20).mean()
