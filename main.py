@@ -74,7 +74,78 @@ async def instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip().upper()
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    data = query.data
 
+    if data.startswith("tf:"):
+        tf = data.split(":")[1]
+        pair = user_state[chat_id].get("pair")
+        if pair:
+            await query.edit_message_text("⏳ Получаю данные...")
+            try:
+                # Получаем данные
+                candles = get_futures_candles(pair, tf)
+                if candles is None or candles.empty:
+                    await query.edit_message_text("❌ Не удалось получить данные для пары. Убедитесь, что она существует.")
+                    return
+                
+                # Добавляем индикаторы
+                add_indicators(candles)
+                
+                # Генерация графика
+                try:
+                    fig = plot_candlestick(candles)
+                    buf = BytesIO()
+                    fig.savefig(buf, format='png', dpi=100)
+                    buf.seek(0)
+                    plt.close(fig)
+                except Exception as e:
+                    logger.error(f"Ошибка генерации графика: {e}")
+                    await query.edit_message_text("❌ Ошибка при создании графика.")
+                    return
+                
+                # Формируем прогноз
+                prediction = escape_markdown(predict_trend(candles))
+                support, resistance = get_support_resistance(candles)
+                tp = calc_tp(candles)
+                sl = calc_sl(candles)
+
+                caption = (
+                    f"<b>{pair} — {tf}</b>\n"
+                    f"📈 Прогноз:\n{prediction}\n"
+                    f"🔻 Поддержка: {support:.2f}\n"
+                    f"🔺 Сопротивление: {resistance:.2f}\n"
+                    f"🎯 Take Profit: {tp}\n"
+                    f"🛑 Stop Loss: {sl}"
+                )
+
+                # Отправляем график
+                try:
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=buf,
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка отправки фото: {e}")
+                    await query.edit_message_text("❌ Ошибка при отправке графика.")
+                
+                # Сохраняем прогноз
+                save_forecast({
+                    "user": chat_id,
+                    "pair": pair,
+                    "timeframe": tf,
+                    "prediction": prediction,
+                    "timestamp": datetime.now().isoformat()
+                })
+
+            except Exception as e:
+                logger.error(f"Общая ошибка в button_handler: {e}")
+                await query.edit_message_text("❌ Произошла непредвиденная ошибка.")
     if text == "📈 НАЧАТЬ ПРОГНОЗ":
         user_state[chat_id] = {}
         await update.message.reply_text(
@@ -100,63 +171,6 @@ async def send_timeframe_buttons(update: Update, context: ContextTypes.DEFAULT_T
         "Выберите таймфрейм:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.message.chat.id
-    data = query.data
-
-    if data.startswith("tf:"):
-        tf = data.split(":")[1]
-        pair = user_state[chat_id].get("pair")
-        if pair:
-            await query.edit_message_text("⏳ Получаю данные...")
-            try:
-                candles = get_futures_candles(pair, tf)
-                if candles is not None and not candles.empty:
-                    add_indicators(candles)
-                    
-                    # Генерация графика
-                    fig = plot_candlestick(candles)
-                    buf = BytesIO()
-                    fig.savefig(buf, format='png', dpi=100)
-                    buf.seek(0)
-                    plt.close(fig)
-                    
-                    prediction = escape_markdown(predict_trend(candles))
-                    support, resistance = get_support_resistance(candles)
-                    tp = calc_tp(candles)
-                    sl = calc_sl(candles)
-
-                    caption = (
-                        f"<b>{pair} — {tf}</b>\n"
-                        f"📈 Прогноз:\n{prediction}\n"
-                        f"🔻 Поддержка: {support:.2f}\n"
-                        f"🔺 Сопротивление: {resistance:.2f}\n"
-                        f"🎯 Take Profit: {tp}\n"
-                        f"🛑 Stop Loss: {sl}"
-                    )
-
-                    await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=buf,
-                        caption=caption,
-                        parse_mode="HTML"
-                    )
-
-                    save_forecast({
-                        "user": chat_id,
-                        "pair": pair,
-                        "timeframe": tf,
-                        "prediction": prediction,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                else:
-                    await query.edit_message_text("❌ Не удалось получить данные для пары. Убедитесь, что она существует.")
-            except Exception as e:
-                logger.error(f"Error generating chart: {e}")
-                await query.edit_message_text("❌ Произошла ошибка при генерации графика.")
     elif data == "back":
         user_state[chat_id].pop("pair", None)
         await context.bot.send_message(chat_id, "Введите новую торговую пару:")
