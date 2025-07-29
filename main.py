@@ -16,28 +16,23 @@ from io import BytesIO
 import telegram
 import asyncio
 
-# 🔐 Токен и ID админа
-TOKEN = '7313454103:AAHNr7UdbLpNNtL0JW7-mQhxJLnRX3Jh88c'
+# 🔐 Получаем токен из переменной окружения
+TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 664563521
 
-# Константы
 TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
 user_state = {}
 user_list = set()
 
-# Логгирование
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# Главное меню
 main_menu = ReplyKeyboardMarkup(
     [[KeyboardButton("📈 Начать прогноз"), KeyboardButton("📖 Инструкция")]],
     resize_keyboard=True)
 
-# Экранирование Markdown
 def escape_markdown(text):
     return re.sub(r'([_*()~`>#+=|{}.!\-])', r'\\1', text)
 
-# Старт
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_list.add(chat_id)
@@ -47,7 +42,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Нажми «📈 Начать прогноз», чтобы ввести пару, или «📖 Инструкция»"),
         reply_markup=main_menu, parse_mode="MarkdownV2")
 
-# Инструкция
 async def instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(escape_markdown(
         "📖 Как пользоваться ботом:\n"
@@ -58,7 +52,6 @@ async def instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🛠️ Также есть админ-панель /admin"),
         parse_mode="MarkdownV2")
 
-# Обработка сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip().upper()
@@ -78,13 +71,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             escape_markdown("Пожалуйста, выберите действие через меню."),
             reply_markup=main_menu, parse_mode="MarkdownV2")
 
-# Кнопки таймфрейма
 async def send_timeframe_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     buttons = [[InlineKeyboardButton(tf, callback_data=f"tf:{tf}")] for tf in TIMEFRAMES]
     buttons.append([InlineKeyboardButton("⬅️ Назад", callback_data="back")])
     await update.message.reply_text("Выберите таймфрейм:", reply_markup=InlineKeyboardMarkup(buttons))
 
-# Обработка кнопок
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -138,7 +129,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "admin_back":
         await query.edit_message_text("↩️ Вы вышли из админ-панели.")
 
-# Получение свечей с Binance Futures
 def get_futures_candles(symbol: str, interval: str, limit: int = 100):
     try:
         url = f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
@@ -161,7 +151,6 @@ def get_futures_candles(symbol: str, interval: str, limit: int = 100):
         logging.error(f"Ошибка загрузки фьючерсных свечей: {e}")
         return None
 
-# Индикаторы
 def add_indicators(df):
     df['EMA20'] = df['Close'].ewm(span=20).mean()
     df['EMA50'] = df['Close'].ewm(span=50).mean()
@@ -174,13 +163,11 @@ def add_indicators(df):
     df['RSI'] = 100 - (100 / (1 + rs))
     df['MACD'] = df['Close'].ewm(12).mean() - df['Close'].ewm(26).mean()
 
-# Поддержка и сопротивление
 def get_support_resistance(df):
     highs = df['High'].rolling(10).max()
     lows = df['Low'].rolling(10).min()
     return lows.iloc[-1], highs.iloc[-1]
 
-# График
 def plot_candlestick(df):
     support, resistance = get_support_resistance(df)
     apds = [
@@ -192,7 +179,6 @@ def plot_candlestick(df):
     fig, _ = mpf.plot(df, type='candle', style='charles', addplot=apds, volume=True, returnfig=True)
     return fig
 
-# Прогноз
 def predict_trend(df):
     close = df['Close'].iloc[-1]
     ema20 = df['EMA20'].iloc[-1]
@@ -220,14 +206,12 @@ def predict_trend(df):
         signals.append("MACD отрицательный")
     return '\n'.join(signals)
 
-# TP / SL
 def calc_tp(df):
     return round(df['Close'].iloc[-1] * 1.03, 2)
 
 def calc_sl(df):
     return round(df['Close'].iloc[-1] * 0.97, 2)
 
-# Сохранение истории
 def save_forecast(entry):
     data = []
     if os.path.exists("forecast_history.json"):
@@ -237,7 +221,6 @@ def save_forecast(entry):
     with open("forecast_history.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# Админ-панель
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ADMIN_ID:
         if update.message:
@@ -262,7 +245,6 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         print(f"Ошибка при отправке admin_panel: {e}")
 
-# История
 async def send_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ADMIN_ID:
         return
@@ -278,7 +260,6 @@ async def send_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         writer.writerows(data)
     await context.bot.send_document(chat_id=update.effective_chat.id, document=open(filename, "rb"))
 
-# Фото от админа
 async def set_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ADMIN_ID:
         return
@@ -291,7 +272,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await photo_file.download_to_drive("admin_uploaded_image.jpg")
     await update.message.reply_text("✅ Фото обновлено!", parse_mode="HTML")
 
-# Flask keep-alive
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -301,7 +281,6 @@ def home():
 def keep_alive():
     Thread(target=lambda: flask_app.run(host='0.0.0.0', port=8080)).start()
 
-# Основной запуск
 async def main():
     await telegram.Bot(token=TOKEN).delete_webhook()
     application = ApplicationBuilder().token(TOKEN).build()
