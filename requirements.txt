@@ -1,5 +1,5 @@
 Flask
-python-telegram-bot==3.11
+python-telegram-bot==20.6
 pandas
 matplotlib
 mplfinance
