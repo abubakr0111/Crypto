@@ -10,7 +10,6 @@ from datetime import datetime
 from io import BytesIO
 import asyncio
 import logging
-import tempfile
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder,
@@ -21,10 +20,9 @@ from telegram.ext import (
     filters
 )
 
-# 🔐 Получаем токен из переменной окружения
+# Конфигурация
 TOKEN = os.environ.get("BOT_TOKEN")
 ADMIN_ID = 664563521
-
 TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
 user_state = {}
 user_list = set()
@@ -74,78 +72,7 @@ async def instruction(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text = update.message.text.strip().upper()
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.message.chat.id
-    data = query.data
 
-    if data.startswith("tf:"):
-        tf = data.split(":")[1]
-        pair = user_state[chat_id].get("pair")
-        if pair:
-            await query.edit_message_text("⏳ Получаю данные...")
-            try:
-                # Получаем данные
-                candles = get_futures_candles(pair, tf)
-                if candles is None or candles.empty:
-                    await query.edit_message_text("❌ Не удалось получить данные для пары. Убедитесь, что она существует.")
-                    return
-                
-                # Добавляем индикаторы
-                add_indicators(candles)
-                
-                # Генерация графика
-                try:
-                    fig = plot_candlestick(candles)
-                    buf = BytesIO()
-                    fig.savefig(buf, format='png', dpi=100)
-                    buf.seek(0)
-                    plt.close(fig)
-                except Exception as e:
-                    logger.error(f"Ошибка генерации графика: {e}")
-                    await query.edit_message_text("❌ Ошибка при создании графика.")
-                    return
-                
-                # Формируем прогноз
-                prediction = escape_markdown(predict_trend(candles))
-                support, resistance = get_support_resistance(candles)
-                tp = calc_tp(candles)
-                sl = calc_sl(candles)
-
-                caption = (
-                    f"<b>{pair} — {tf}</b>\n"
-                    f"📈 Прогноз:\n{prediction}\n"
-                    f"🔻 Поддержка: {support:.2f}\n"
-                    f"🔺 Сопротивление: {resistance:.2f}\n"
-                    f"🎯 Take Profit: {tp}\n"
-                    f"🛑 Stop Loss: {sl}"
-                )
-
-                # Отправляем график
-                try:
-                    await context.bot.send_photo(
-                        chat_id=chat_id,
-                        photo=buf,
-                        caption=caption,
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки фото: {e}")
-                    await query.edit_message_text("❌ Ошибка при отправке графика.")
-                
-                # Сохраняем прогноз
-                save_forecast({
-                    "user": chat_id,
-                    "pair": pair,
-                    "timeframe": tf,
-                    "prediction": prediction,
-                    "timestamp": datetime.now().isoformat()
-                })
-
-            except Exception as e:
-                logger.error(f"Общая ошибка в button_handler: {e}")
-                await query.edit_message_text("❌ Произошла непредвиденная ошибка.")
     if text == "📈 НАЧАТЬ ПРОГНОЗ":
         user_state[chat_id] = {}
         await update.message.reply_text(
@@ -171,6 +98,62 @@ async def send_timeframe_buttons(update: Update, context: ContextTypes.DEFAULT_T
         "Выберите таймфрейм:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    data = query.data
+
+    if data.startswith("tf:"):
+        tf = data.split(":")[1]
+        pair = user_state[chat_id].get("pair")
+        if pair:
+            await query.edit_message_text("⏳ Получаю данные...")
+            try:
+                candles = get_futures_candles(pair, tf)
+                if candles is not None and not candles.empty:
+                    add_indicators(candles)
+                    
+                    fig = plot_candlestick(candles)
+                    buf = BytesIO()
+                    fig.savefig(buf, format='png', dpi=100)
+                    buf.seek(0)
+                    plt.close(fig)
+                    
+                    prediction = escape_markdown(predict_trend(candles))
+                    support, resistance = get_support_resistance(candles)
+                    tp = calc_tp(candles)
+                    sl = calc_sl(candles)
+
+                    caption = (
+                        f"<b>{pair} — {tf}</b>\n"
+                        f"📈 Прогноз:\n{prediction}\n"
+                        f"🔻 Поддержка: {support:.2f}\n"
+                        f"🔺 Сопротивление: {resistance:.2f}\n"
+                        f"🎯 Take Profit: {tp}\n"
+                        f"🛑 Stop Loss: {sl}"
+                    )
+
+                    await context.bot.send_photo(
+                        chat_id=chat_id,
+                        photo=buf,
+                        caption=caption,
+                        parse_mode="HTML"
+                    )
+
+                    save_forecast({
+                        "user": chat_id,
+                        "pair": pair,
+                        "timeframe": tf,
+                        "prediction": prediction,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                else:
+                    await query.edit_message_text("❌ Не удалось получить данные для пары. Убедитесь, что она существует.")
+            except Exception as e:
+                logger.error(f"Error generating chart: {e}")
+                await query.edit_message_text("❌ Произошла ошибка при генерации графика.")
     elif data == "back":
         user_state[chat_id].pop("pair", None)
         await context.bot.send_message(chat_id, "Введите новую торговую пару:")
@@ -217,8 +200,8 @@ def get_support_resistance(df):
     return lows.iloc[-1], highs.iloc[-1]
 
 def plot_candlestick(df):
-    plt.ioff()  # Отключаем интерактивный режим
-    plt.switch_backend('Agg')  # Используем non-GUI бэкенд
+    plt.ioff()
+    plt.switch_backend('Agg')
     
     support, resistance = get_support_resistance(df)
     apds = [
@@ -237,7 +220,6 @@ def plot_candlestick(df):
         returnfig=True,
         figsize=(10, 8)
     )
-    
     return fig
 
 def predict_trend(df):
@@ -288,10 +270,7 @@ def save_forecast(entry):
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ADMIN_ID:
-        if update.message:
-            await update.message.reply_text("❌ Нет доступа", parse_mode="HTML")
-        elif update.callback_query:
-            await update.callback_query.answer("❌ Нет доступа", show_alert=True)
+        await update.message.reply_text("❌ Нет доступа", parse_mode="HTML")
         return
 
     text = (f"<b>🛠️ Админ-панель</b>\n"
@@ -302,13 +281,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "🕓 <b>/history</b> — история прогнозов (файл)")
 
     keyboard = [[InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")]]
-    try:
-        if update.message:
-            await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-        elif update.callback_query:
-            await update.callback_query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception as e:
-        logger.error(f"Ошибка при отправке admin_panel: {e}")
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def send_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ADMIN_ID:
@@ -365,13 +338,9 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text="Произошла ошибка. Пожалуйста, попробуйте позже."
         )
 
-# ... (весь ваш предыдущий код остается без изменений до функции main)
-
-async def main():
-    # Создаем приложение
+def main():
     application = ApplicationBuilder().token(TOKEN).build()
     
-    # Добавляем обработчики
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CommandHandler("history", send_history))
@@ -381,41 +350,8 @@ async def main():
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_error_handler(error_handler)
     
-    # Удаляем существующий webhook
-    await application.bot.delete_webhook()
-    
-    # Запускаем webhook
-    await application.run_webhook(
-        listen="0.0.0.0",
-        port=int(os.environ.get("PORT", 8080)),  # Render использует порт из переменной окружения
-        url_path=TOKEN,
-        webhook_url=f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}",
-        secret_token=os.environ.get('WEBHOOK_SECRET', 'YOUR_SECRET_TOKEN')
-    )
-
-if __name__ == '__main__':
-    # Просто запускаем main() без asyncio.run()
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    # Добавляем обработчики (дублируем, так как это теперь синхронный код)
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("admin", admin_panel))
-    application.add_handler(CommandHandler("history", send_history))
-    application.add_handler(CommandHandler("set_photo", set_photo))
-    application.add_handler(MessageHandler(filters.PHOTO, photo_handler))
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_error_handler(error_handler)
-    
-    # Для Render лучше использовать polling, если у вас нет домена с HTTPS
+    logger.info("Бот запущен в режиме polling...")
     application.run_polling()
 
 if __name__ == '__main__':
-    application = ApplicationBuilder().token(TOKEN).build()
-    
-    # Добавьте все обработчики
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("admin", admin_panel))
-    # ... остальные обработчики ...
-    
-    application.run_polling()
+    main()
